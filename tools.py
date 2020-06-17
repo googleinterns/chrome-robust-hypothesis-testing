@@ -1,11 +1,13 @@
 from scipy.stats import t
 import numpy as np
 import pandas as pd
+import pdb
 
 
 def get_alpha_quantile_student(ci_level, degree_of_freedom=19):
     """
-    Computing quantiles for Student t-distribution at a given/target CI coverage level
+    Computing quantiles for Student t-distribution 
+      at a given/target CI coverage level
 
     Parameters
     ----------
@@ -29,11 +31,92 @@ def get_alpha_quantile_student(ci_level, degree_of_freedom=19):
     return qq
 
 
+def compute_quantile_hist_data(histogram_counts, bins,
+                               quantile):
+    """
+    Compute the quantile value for binned data
+
+    Parameters
+    ----------
+      histogram_counts: array_like
+        a vector of counts (or weights) of |bins|.
+      bins: list
+        list of (int, int) pairs specifying bin lower and
+        upper edge
+      quantile: 
+        the quantile to compute (float from ]0, 1[ interval).
+
+    Returns
+    ----------
+      value of the desired quantile
+    """
+
+    # compute cumulative distirubtion
+    cumulative_sum = histogram_counts.cumsum()
+
+    # find cumulative value correponding to the target quantile
+    count_below_quantile = quantile * cumulative_sum[-1]
+
+    # find the index of the correponding bin
+    nearest_position = cumulative_sum.searchsorted(count_below_quantile)
+
+    # get left and right endpoints of the bin
+    b_value_min, b_value_max = bins[nearest_position]
+
+    # find values of the cum sum to perform interpolation
+    if nearest_position == 0:
+        cum_v_value_min, cum_v_value_max = 0, cumulative_sum[0]
+    else:
+        cum_v_value_min, cum_v_value_max = cumulative_sum[nearest_position -
+                                                          1], cumulative_sum[nearest_position]
+
+    # perform interpolation on a log-scale
+    y = np.array([b_value_min, b_value_max])
+    x = np.array([cum_v_value_min, cum_v_value_max])
+
+    y = np.log2(y)
+    q = np.interp(count_below_quantile, x, y)
+    q = np.exp2(q)
+
+    return q
+
+
+def compute_mean_hist_data(histogram_counts, bins):
+    """
+    Compute the mean for binned data by taking
+    a weighted average of midpoints of the bins
+
+    Parameters
+    ----------
+      histogram_counts: array_like
+        a vector of counts (or weights) of |bins|.
+      bins: list
+        list of (int, int) pairs specifying bin lower and
+        upper edge
+
+    Returns
+    ----------
+      estimate of the mean value
+    """
+
+    assert len(bins) == len(histogram_counts)
+
+    # compute midpoints of each bin
+    bin_midpoints = [np.mean(cur_bin) for cur_bin in bins]
+
+    # compute weighted mean with weights being number of observations in a bin
+    total_counts = sum(histogram_counts)
+    if total_counts != 0:
+        return sum((np.array(bin_midpoints) * histogram_counts)) / sum(histogram_counts)
+    else:
+        return 0
+
+
 def jackknife_t_test(treatment_mv_all_buckets, treatment_mv_all_expect_given,
                      control_mv_all_buckets, control_mv_all_expect_given,
                      ci_level):
     """
-    Jackknife t-test for data in buckets
+    Jackknife t-test for data in cookie buckets
 
     Parameters
     ----------
@@ -99,7 +182,7 @@ def jackknife_t_test(treatment_mv_all_buckets, treatment_mv_all_expect_given,
 def jackknife_cookie_bucket_mean(treatment_group, control_group,
                                  number_of_buckets, ci_level):
     """"
-    Perform jackknife cookie bucket test  
+    Perform jackknife cookie bucket test (for not binned data)
 
     Parameters
     ----------
@@ -130,9 +213,9 @@ def jackknife_cookie_bucket_mean(treatment_group, control_group,
     """
 
     # temporarily add bucket id
-    treatment_group['Bucket id'] = (
+    treatment_group['Bucket ID'] = (
         treatment_group['Client ID'] % number_of_buckets).astype('int')
-    control_group['Bucket id'] = (
+    control_group['Bucket ID'] = (
         control_group['Client ID'] % number_of_buckets).astype('int')
 
     # list of all bucket ids
@@ -144,14 +227,14 @@ def jackknife_cookie_bucket_mean(treatment_group, control_group,
 
     for cur_bucket in bucket_ids:
         # leave one bucket out and compute the mean
-        treatment_group_mv += [treatment_group.loc[treatment_group['Bucket id']
+        treatment_group_mv += [treatment_group.loc[treatment_group['Bucket ID']
                                                    != cur_bucket]['Metric Value'].mean()]
-        control_group_mv += [control_group.loc[control_group['Bucket id']
+        control_group_mv += [control_group.loc[control_group['Bucket ID']
                                                != cur_bucket]['Metric Value'].mean()]
 
     # removing temporary column
-    treatment_group = treatment_group.drop(axis=1, columns=['Bucket id'])
-    control_group = control_group.drop(axis=1, columns=['Bucket id'])
+    treatment_group = treatment_group.drop(axis=1, columns=['Bucket ID'])
+    control_group = control_group.drop(axis=1, columns=['Bucket ID'])
 
     # convert to array for further purposes
     treatment_group_mv = np.stack(treatment_group_mv)
@@ -171,7 +254,7 @@ def jackknife_cookie_bucket_mean(treatment_group, control_group,
 def jackknife_cookie_bucket_quantile(treatment_group, control_group,
                                      number_of_buckets, ci_level, quantile_to_test):
     """"
-    Perform jackknife cookie bucket test  
+    Perform jackknife cookie bucket test (for not binned data)
 
     Parameters
     ----------
@@ -205,9 +288,9 @@ def jackknife_cookie_bucket_quantile(treatment_group, control_group,
     """
 
     # temporarily add bucket id
-    treatment_group['Bucket id'] = (
+    treatment_group['Bucket ID'] = (
         treatment_group['Client ID'] % number_of_buckets).astype('int')
-    control_group['Bucket id'] = (
+    control_group['Bucket ID'] = (
         control_group['Client ID'] % number_of_buckets).astype('int')
 
     # list of all bucket ids
@@ -219,16 +302,16 @@ def jackknife_cookie_bucket_quantile(treatment_group, control_group,
 
     for cur_bucket in bucket_ids:
         # leave one bucket out and compute the quantile
-        treatment_group_mv += [treatment_group.loc[treatment_group['Bucket id']
+        treatment_group_mv += [treatment_group.loc[treatment_group['Bucket ID']
                                                    != cur_bucket][
             'Metric Value'].quantile(q=quantile_to_test)]
-        control_group_mv += [control_group.loc[control_group['Bucket id']
+        control_group_mv += [control_group.loc[control_group['Bucket ID']
                                                != cur_bucket][
             'Metric Value'].quantile(q=quantile_to_test)]
 
     # removing temporary column
-    treatment_group = treatment_group.drop(axis=1, columns=['Bucket id'])
-    control_group = control_group.drop(axis=1, columns=['Bucket id'])
+    treatment_group = treatment_group.drop(axis=1, columns=['Bucket ID'])
+    control_group = control_group.drop(axis=1, columns=['Bucket ID'])
 
     # convert to array for further purposes
     treatment_group_mv = np.stack(treatment_group_mv)
@@ -246,51 +329,218 @@ def jackknife_cookie_bucket_quantile(treatment_group, control_group,
     return ci_center, ci_size
 
 
-def compute_quantile_hist_data(histogram_counts, bins,
-                               quantile):
+def jackknife_cookie_bucket_quantile_binned(treatment_binned_data, control_binned_data,
+                                            bins_boundaries, number_of_buckets,
+                                            ci_level, quantile_to_test):
+    """"
+    Perform jackknife cookie bucket test (for binned data)
+
+    Parameters
+    ----------
+      treatment_binned_data: pd.Dataframe
+        dataframe corresponding to treatment group that contains two types of columns:
+          - Client ID
+          - Count of observations in Bin "j" for a given client
+
+      control_binned_data: pd.Dataframe
+        dataframe corresponding to control group that contains two types of columns:
+          - Client ID
+          - Count of observations in Bin "j" for a given client
+
+      bins_boundaries: list of bins boundaries (excluding zero)
+        Example: [1,3,5,9,16] corresponds to 5 bins
+
+      number_of_buckets: int
+        number of buckets to be used for performing the test
+
+      ci_level: (0,1)
+        nominal coverage of the CI 
+
+      quantile_to_test: (0,1)
+        quantile for which Jackknife Cookie Bucket test is to be performed
+
+    Returns
+    ----------
+      ci_center:
+        center of the confidence interval
+
+      ci_size:
+        size/radius of the confidence interval 
+
     """
-    Compute the value at a quantile of on a histogram
 
-      Parameters
-      ----------
-      histogram_counts: array_like
-        a vector of counts (or weights) of |bins|.
-      bins: list
-        list of (int, int) pairs specifying bin lower and
-        upper edge
-      quantile: 
-        the quantile to compute (float from ]0, 1[ interval).
+    # pdb.set_trace()
 
-      Returns
-      ----------
-        value of the desired quantile
+    # list of all bucket ids
+    bucket_ids = np.arange(number_of_buckets).tolist()
+
+    # compute buckets corresponding to each client
+    treatment_binned_data['Bucket ID'] = (treatment_binned_data['Client ID'] %
+                                          number_of_buckets).astype('int')
+
+    control_binned_data['Bucket ID'] = (control_binned_data['Client ID'] %
+                                        number_of_buckets).astype('int')
+
+    # compute histogram data / total counts within each bucket
+    treatment_bucket_data = treatment_binned_data.groupby('Bucket ID').sum()
+    control_bucket_data = control_binned_data.groupby('Bucket ID').sum()
+
+    # drop client ID from bucketed data
+    treatment_bucket_data = treatment_bucket_data.drop(
+        axis=1, columns=['Client ID'])
+    control_bucket_data = control_bucket_data.drop(
+        axis=1, columns=['Client ID'])
+
+    # drop temporary columns from the Dataframes
+    treatment_binned_data = treatment_binned_data.drop(
+        axis=1, columns=['Bucket ID'])
+    control_binned_data = control_binned_data.drop(
+        axis=1, columns=['Bucket ID'])
+
+    # for stacking the results for both treatment and control groups
+    treatment_group_mv = list()
+    control_group_mv = list()
+
+    # number of histogram bins
+    num_of_bins = len(bins_boundaries)
+
+    # obtain bins given boundaries
+    bins_tuples = [(0, bins_boundaries[0])] + [(bins_boundaries[i-1],
+                                                bins_boundaries[i])
+                                               for i in range(1, num_of_bins)]
+
+    for cur_bucket in bucket_ids:
+        # leave one bucket out and compute the total counts for the left buckets
+        cur_hist_treatment = treatment_bucket_data[treatment_bucket_data.index
+                                                   != cur_bucket].sum().values
+        cur_hist_control = control_bucket_data[control_bucket_data.index
+                                               != cur_bucket].sum().values
+        # compute approximate quantiles based on binned data
+        treatment_group_mv += [compute_quantile_hist_data(
+            cur_hist_treatment, bins_tuples, quantile=quantile_to_test)]
+        control_group_mv += [compute_quantile_hist_data(
+            cur_hist_control, bins_tuples, quantile=quantile_to_test)]
+
+    # convert to array for further purposes
+    treatment_group_mv = np.stack(treatment_group_mv)
+    control_group_mv = np.stack(control_group_mv)
+
+    # compute approximate quantiles for all buckets and both groups
+    treatment_all = compute_quantile_hist_data(
+        treatment_bucket_data.sum().values, bins_tuples, quantile=quantile_to_test)
+
+    control_all = compute_quantile_hist_data(
+        control_bucket_data.sum().values, bins_tuples, quantile=quantile_to_test)
+
+    ci_center, ci_size = jackknife_t_test(treatment_all, treatment_group_mv,
+                                          control_all, control_group_mv,
+                                          ci_level)
+
+    return ci_center, ci_size
+
+
+def jackknife_cookie_bucket_mean_binned(treatment_binned_data, control_binned_data,
+                                        bins_boundaries, number_of_buckets,
+                                        ci_level):
+    """"
+    Perform jackknife cookie bucket test (for binned data)
+
+    Parameters
+    ----------
+      treatment_binned_data: pd.Dataframe
+        dataframe corresponding to treatment group that contains two types of columns:
+          - Client ID
+          - Count of observations in Bin "j" for a given client
+
+      control_binned_data: pd.Dataframe
+        dataframe corresponding to control group that contains two types of columns:
+          - Client ID
+          - Count of observations in Bin "j" for a given client
+
+      bins_boundaries: list of bins boundaries (excluding zero)
+        Example: [1,3,5,9,16] corresponds to 5 bins
+
+      number_of_buckets: int
+        number of buckets to be used for performing the test
+
+      ci_level: (0,1)
+        nominal coverage of the CI 
+
+    Returns
+    ----------
+      ci_center:
+        center of the confidence interval
+
+      ci_size:
+        size/radius of the confidence interval 
+
     """
 
-    # compute cumulative distirubtion
-    cumulative_sum = histogram_counts.cumsum()
+    # pdb.set_trace()
 
-    # find cumulative value correponding to the target quantile
-    count_below_quantile = quantile * cumulative_sum[-1]
+    # list of all bucket ids
+    bucket_ids = np.arange(number_of_buckets).tolist()
 
-    # find the index of the correponding bin
-    nearest_position = cumulative_sum.searchsorted(count_below_quantile)
+    # compute buckets corresponding to each client
+    treatment_binned_data['Bucket ID'] = (treatment_binned_data['Client ID'] %
+                                          number_of_buckets).astype('int')
 
-    # get left and right endpoints of the bin
-    b_value_min, b_value_max = bins[nearest_position]
+    control_binned_data['Bucket ID'] = (control_binned_data['Client ID'] %
+                                        number_of_buckets).astype('int')
 
-    # find values of the cum sum to perform interpolation
-    if nearest_position == 0:
-        cum_v_value_min, cum_v_value_max = 0, cumulative_sum[0]
-    else:
-        cum_v_value_min, cum_v_value_max = cumulative_sum[nearest_position -
-                                                          1], cumulative_sum[nearest_position]
+    # compute histogram data / total counts within each bucket
+    treatment_bucket_data = treatment_binned_data.groupby('Bucket ID').sum()
+    control_bucket_data = control_binned_data.groupby('Bucket ID').sum()
 
-    # perform interpolation on a log-scale
-    y = np.array([b_value_min, b_value_max])
-    x = np.array([cum_v_value_min, cum_v_value_max])
+    # drop client ID from bucketed data
+    treatment_bucket_data = treatment_bucket_data.drop(
+        axis=1, columns=['Client ID'])
+    control_bucket_data = control_bucket_data.drop(
+        axis=1, columns=['Client ID'])
 
-    y = np.log2(y)
-    q = np.interp(count_below_quantile, x, y)
-    q = np.exp2(q)
+    # drop temporary columns from the Dataframes
+    treatment_binned_data = treatment_binned_data.drop(
+        axis=1, columns=['Bucket ID'])
+    control_binned_data = control_binned_data.drop(
+        axis=1, columns=['Bucket ID'])
 
-    return q
+    # for stacking the results for both treatment and control groups
+    treatment_group_mv = list()
+    control_group_mv = list()
+
+    # number of histogram bins
+    num_of_bins = len(bins_boundaries)
+
+    # obtain bins given boundaries
+    bins_tuples = [(0, bins_boundaries[0])] + [(bins_boundaries[i-1],
+                                                bins_boundaries[i])
+                                               for i in range(1, num_of_bins)]
+
+    for cur_bucket in bucket_ids:
+        # leave one bucket out and compute the total counts for the left buckets
+        cur_hist_treatment = treatment_bucket_data[treatment_bucket_data.index
+                                                   != cur_bucket].sum().values
+        cur_hist_control = control_bucket_data[control_bucket_data.index
+                                               != cur_bucket].sum().values
+        # compute approximate means based on binned data
+        treatment_group_mv += [compute_mean_hist_data(
+            cur_hist_treatment, bins_tuples)]
+        control_group_mv += [compute_mean_hist_data(
+            cur_hist_control, bins_tuples)]
+
+    # convert to array for further purposes
+    treatment_group_mv = np.stack(treatment_group_mv)
+    control_group_mv = np.stack(control_group_mv)
+
+    # compute approximate means for all buckets and both groups
+    treatment_all = compute_mean_hist_data(
+        treatment_bucket_data.sum().values, bins_tuples)
+
+    control_all = compute_mean_hist_data(
+        control_bucket_data.sum().values, bins_tuples)
+
+    ci_center, ci_size = jackknife_t_test(treatment_all, treatment_group_mv,
+                                          control_all, control_group_mv,
+                                          ci_level)
+
+    return ci_center, ci_size
