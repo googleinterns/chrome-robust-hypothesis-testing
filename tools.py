@@ -123,7 +123,7 @@ def get_exponential_bins(bin_min, bin_max, num_bins=100):
     Parameters
     ----------
       bin_min: 
-        the minimum bin left boundary (except the underflow
+        the minimum bin left boundary (including the underflow
         bin)
       bin_max
       maximum bin (except the overflow
@@ -137,7 +137,7 @@ def get_exponential_bins(bin_min, bin_max, num_bins=100):
     """
     bin_min = int(bin_min) or 1
     # Do not add 0 as the underflow bin value.
-    bin_bounds = [bin_min]
+    bin_bounds = [0, bin_min]
     for bin_index in range(2, num_bins):
         log_ratio = (math.log(bin_max) - math.log(bin_min)) / (
             num_bins - bin_index)
